@@ -2,6 +2,7 @@
 
 A highly performant python sdk for Polymarket.
 
+[![PyPI](https://img.shields.io/pypi/v/eggplant-sdk)](https://pypi.org/project/eggplant-sdk/)
 [![CI](https://github.com/promethean-quantitative/eggplant-sdk-py/actions/workflows/ci.yml/badge.svg)](https://github.com/promethean-quantitative/eggplant-sdk-py/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
@@ -74,6 +75,8 @@ endpoints just aren't wrapped.
 no amount-in, price-discovered market-order helper.
 
 ## Install
+
+From [PyPI](https://pypi.org/project/eggplant-sdk/):
 
 ```sh
 pip install eggplant-sdk
@@ -480,6 +483,11 @@ vectors; still, validate any new integration with small sizes first.
 - Python ≥ 3.11.
 - Relayer operations require API credentials from Polymarket's builder
   program.
+
+## Contributing
+
+Dev setup, the test/lint workflow, project conventions, and the release
+process are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Disclaimer
 
