@@ -18,6 +18,7 @@ from eggplant_sdk.convert import (
     build_merge_calldata,
     build_merge_calldata_ctf,
     build_redeem_calldata,
+    build_redeem_calldata_ctf,
     build_split_calldata,
     build_split_calldata_ctf,
     classify_event,
@@ -130,6 +131,15 @@ def test_redeem_calldata_selector_layout_and_target():
     assert len(calls) == 1
     assert calls[0].target == NEG_RISK_ADAPTER
     assert calls[0].data == build_redeem_calldata(cid, 1, 2)
+
+
+def test_ctf_redeem_calldata_selector_and_layout():
+    cid = qid_hex("04")
+    data = build_redeem_calldata_ctf(USDC_E, cid, [1, 2])
+    # selector(4) + collateral + parent + conditionId + array offset + len +
+    # 2 elems = 4 + 7 * 32.
+    assert len(data) == 4 + 7 * 32
+    assert data[:4] == keccak(b"redeemPositions(address,bytes32,bytes32,uint256[])")[:4]
 
 
 def test_convert_legs_parses_and_skips():

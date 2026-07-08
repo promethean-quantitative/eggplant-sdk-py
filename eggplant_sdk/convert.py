@@ -278,6 +278,23 @@ def build_redeem_calldata(condition_id: bytes, yes_amount: int, no_amount: int) 
     )
 
 
+def build_redeem_calldata_ctf(collateral: str, condition_id: bytes, index_sets: list[int]) -> bytes:
+    """Calldata for the plain CTF ``redeemPositions`` (binary markets):
+    ``parentCollectionId`` zero and the outcome ``index_sets`` to redeem
+    (``[1, 2]`` covers both slots of a binary condition).
+
+    Unlike :func:`build_redeem_calldata`, the CTF redeems the caller's *full*
+    balance of the given index sets (no per-token amounts) and pays out in
+    ``collateral`` — so pass the collateral token the condition was prepared
+    with. Only meaningful once the condition is resolved.
+    """
+    return _rpc.encode_call(
+        "redeemPositions(address,bytes32,bytes32,uint256[])",
+        ["address", "bytes32", "bytes32", "uint256[]"],
+        [collateral, b"\x00" * 32, condition_id, index_sets],
+    )
+
+
 def redeem_calls(redeems: list[tuple[bytes, int, int]]) -> list[DepositWalletCall]:
     """``DepositWallet`` calls to redeem resolved negRisk positions, one per
     condition.
