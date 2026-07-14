@@ -385,7 +385,9 @@ def test_plan_calls_large_plan_emits_every_call():
 def pc(gas: int) -> PlannedCall:
     """Shorthand for a PlannedCall with the given gas weight (calldata is
     irrelevant to chunking)."""
-    return PlannedCall(call=DepositWalletCall(target=NEG_RISK_COLLATERAL_ADAPTER, data=b""), gas=gas)
+    return PlannedCall(
+        call=DepositWalletCall(target=NEG_RISK_COLLATERAL_ADAPTER, data=b""), gas=gas
+    )
 
 
 def test_gas_chunks_empty_and_single_chunk():
