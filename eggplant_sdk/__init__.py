@@ -8,7 +8,8 @@ What's here:
   pools.
 - **Relayer operations** — gasless merge / split / convert / redeem for
   negRisk positions through Polymarket's relayer, including the
-  ``DepositWallet`` batch path.
+  ``DepositWallet`` batch path, plus a :mod:`~eggplant_sdk.sweep` safety net
+  that settles every held position in one pass.
 - **Market data** — lenient order-book fetching, Gamma API events, Data API
   positions, and WebSocket streams for both the market and user channels.
 
@@ -35,6 +36,7 @@ from . import (
     redeem,
     relayer,
     signer,
+    sweep,
     ws,
 )
 from .auth import Credentials
@@ -85,5 +87,6 @@ __all__ = [
     "redeem",
     "relayer",
     "signer",
+    "sweep",
     "ws",
 ]

@@ -3,7 +3,12 @@
 import pytest
 from eth_utils import keccak
 
-from eggplant_sdk.chain import COLLATERAL_ONRAMP, NEG_RISK_ADAPTER, USDC_E
+from eggplant_sdk.chain import (
+    COLLATERAL,
+    COLLATERAL_ONRAMP,
+    NEG_RISK_COLLATERAL_ADAPTER,
+    USDC_E,
+)
 from eggplant_sdk.convert import (
     MERGE_GAS,
     ConvertLeg,
@@ -81,26 +86,29 @@ def test_build_calldata_produces_valid_encoding():
     assert data[:4] == keccak(b"convertPositions(bytes32,uint256,uint256)")[:4]
 
 
-def test_merge_calldata_selector():
-    data = build_merge_calldata(b"\x11" * 32, 1)
-    assert len(data) == 68
-    assert data[:4] == keccak(b"mergePositions(bytes32,uint256)")[:4]
+def test_merge_calldata_uses_ctf_mirror_overload():
+    # The collateral adapter's legacy 2-arg mergePositions reverts; the working
+    # entrypoint is the CTF-mirror form with pUSD collateral.
+    cid = b"\x11" * 32
+    data = build_merge_calldata(cid, 1)
+    assert len(data) == 4 + 8 * 32
+    assert data[:4] == keccak(b"mergePositions(address,bytes32,bytes32,uint256[],uint256)")[:4]
+    # Byte-identical to the explicit CTF-mirror builder with pUSD collateral.
+    assert data == build_merge_calldata_ctf(COLLATERAL, cid, 1)
 
 
-def test_split_calldata_selector_mirrors_merge():
-    # The 2-arg adapter split is the exact structural mirror of the heavily
-    # exercised 2-arg merge.
+def test_split_calldata_uses_ctf_mirror_overload():
+    # Split takes the exact symmetric CTF-mirror shape of the verified merge,
+    # through the same collateral adapter.
     cid = b"\x22" * 32
     data = build_split_calldata(cid, 5_000_000)
-    assert len(data) == 68
-    assert data[:4] == keccak(b"splitPosition(bytes32,uint256)")[:4]
-    # Args ride verbatim: conditionId word then amount word.
-    assert data[4:36] == cid
-    assert int.from_bytes(data[36:68], "big") == 5_000_000
+    assert len(data) == 4 + 8 * 32
+    assert data[:4] == keccak(b"splitPosition(address,bytes32,bytes32,uint256[],uint256)")[:4]
+    assert data == build_split_calldata_ctf(COLLATERAL, cid, 5_000_000)
 
     calls = split_calls([(cid, 5_000_000)])
     assert len(calls) == 1
-    assert calls[0].target == NEG_RISK_ADAPTER
+    assert calls[0].target == NEG_RISK_COLLATERAL_ADAPTER
     assert calls[0].data == data
 
 
@@ -119,18 +127,21 @@ def test_ctf_split_and_merge_calldata_layout():
     assert split[4:] == merge[4:]
 
 
-def test_redeem_calldata_selector_layout_and_target():
+def test_redeem_calldata_uses_ctf_mirror_overload():
     cid = qid_hex("03")
+    # Only YES held → the single index set [1]; CTF-mirror redeem.
     data = build_redeem_calldata(cid, 523_000_000, 0)
-    # selector(4) + conditionId(32) + array offset(32) + len(32) + 2 elems = 164
-    assert len(data) == 164
-    assert data[:4] == keccak(b"redeemPositions(bytes32,uint256[])")[:4]
+    # selector(4) + collateral + parent + conditionId + offset + len + 1 elem = 4 + 6*32
+    assert len(data) == 4 + 6 * 32
+    assert data[:4] == keccak(b"redeemPositions(address,bytes32,bytes32,uint256[])")[:4]
+    # Held-side inclusion, not amounts: YES>0, NO=0 ⇒ index sets [1].
+    assert data == build_redeem_calldata_ctf(COLLATERAL, cid, [1])
 
-    # redeem_calls wraps the same calldata against the shared adapter.
+    # Both sides held ⇒ both index sets, against the collateral adapter.
     calls = redeem_calls([(cid, 1, 2)])
     assert len(calls) == 1
-    assert calls[0].target == NEG_RISK_ADAPTER
-    assert calls[0].data == build_redeem_calldata(cid, 1, 2)
+    assert calls[0].target == NEG_RISK_COLLATERAL_ADAPTER
+    assert calls[0].data == build_redeem_calldata_ctf(COLLATERAL, cid, [1, 2])
 
 
 def test_ctf_redeem_calldata_selector_and_layout():
@@ -343,9 +354,9 @@ def test_plan_calls_orders_merges_converts_post_merges():
     # post-batch by balance read; an in-batch proceeds-sized wrap is rejected
     # by the relayer's simulation).
     assert len(calls) == 3
-    merge_selector = keccak(b"mergePositions(bytes32,uint256)")[:4]
+    merge_selector = keccak(b"mergePositions(address,bytes32,bytes32,uint256[],uint256)")[:4]
     convert_selector = keccak(b"convertPositions(bytes32,uint256,uint256)")[:4]
-    assert calls[0].call.target == NEG_RISK_ADAPTER
+    assert calls[0].call.target == NEG_RISK_COLLATERAL_ADAPTER
     assert calls[0].call.data[:4] == merge_selector
     assert calls[0].gas == MERGE_GAS
     assert calls[1].call.data[:4] == convert_selector
@@ -374,7 +385,7 @@ def test_plan_calls_large_plan_emits_every_call():
 def pc(gas: int) -> PlannedCall:
     """Shorthand for a PlannedCall with the given gas weight (calldata is
     irrelevant to chunking)."""
-    return PlannedCall(call=DepositWalletCall(target=NEG_RISK_ADAPTER, data=b""), gas=gas)
+    return PlannedCall(call=DepositWalletCall(target=NEG_RISK_COLLATERAL_ADAPTER, data=b""), gas=gas)
 
 
 def test_gas_chunks_empty_and_single_chunk():
@@ -412,7 +423,7 @@ def test_gas_chunks_count_cap_still_applies():
 
 
 def test_wrap_calls_shapes():
-    wallet = NEG_RISK_ADAPTER  # any address works for the shape test
+    wallet = NEG_RISK_COLLATERAL_ADAPTER  # any address works for the shape test
     no_approve = wrap_calls(wallet, 5, False)
     assert len(no_approve) == 1
     assert no_approve[0].target == COLLATERAL_ONRAMP
@@ -450,5 +461,5 @@ def test_unpack_long_result_errors():
 
 def test_merge_calls_target_adapter():
     calls = merge_calls([(b"\x01" * 32, 5)])
-    assert calls[0].target == NEG_RISK_ADAPTER
+    assert calls[0].target == NEG_RISK_COLLATERAL_ADAPTER
     assert calls[0].data == build_merge_calldata(b"\x01" * 32, 5)

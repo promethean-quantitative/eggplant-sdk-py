@@ -4,13 +4,15 @@ to empty in gas-bounded relayer batches.
 :meth:`~eggplant_sdk.data.DataApiClient.all_redeemable_positions` reports which
 of a wallet's positions have resolved and can be redeemed; :func:`redeem_all`
 collects them all and dispatches each to the right on-chain redeem call for its
-market shape — a multi-outcome condition through the adapter with its exact
-held amounts, a binary condition through the CTF with its outcome index sets.
-Both need the wallet's on-chain balances, read here in one batched
+market shape — a multi-outcome condition through the pUSD collateral adapter, a
+binary condition through the CTF — each carrying the held outcome's **index
+sets** (the adapter and the CTF both redeem the caller's *full* balance of each
+set). Both still need the wallet's on-chain balances, read here in one batched
 ``balanceOfBatch`` per pass (the Data API's ``size`` is a float and would
-misround the raw unit) — to size the adapter redeems, and to skip conditions
-the wallet no longer holds. A too-high amount, or a wrong outcome order,
-reverts on-chain, so a mis-built call fails safe instead of losing funds.
+misround the raw unit) — to decide which outcome sides are held, and to skip
+conditions the wallet no longer holds or holds only dust of. Redeeming an unheld
+or unresolved condition reverts on-chain, so a mis-built call fails safe instead
+of losing funds.
 
 Redeeming is idempotent: a redeemed position drops out of the ``redeemable``
 filter, so a re-fetch never returns it twice. That, plus the Data API's offset
@@ -30,7 +32,7 @@ import logging
 from dataclasses import dataclass
 
 from . import _rpc
-from .chain import CTF, NEG_RISK_ADAPTER, POLYGON, contract_config
+from .chain import CTF, NEG_RISK_COLLATERAL_ADAPTER, POLYGON, contract_config
 from .convert import (
     build_redeem_calldata,
     build_redeem_calldata_ctf,
@@ -203,7 +205,7 @@ def _build_calls(redemptions: list[Redemption], ctf_collateral: str) -> list[Dep
         if r.neg_risk:
             calls.append(
                 DepositWalletCall(
-                    target=NEG_RISK_ADAPTER,
+                    target=NEG_RISK_COLLATERAL_ADAPTER,
                     data=build_redeem_calldata(r.condition_id, r.yes_amount, r.no_amount),
                 )
             )

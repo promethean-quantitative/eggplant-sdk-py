@@ -15,7 +15,13 @@ import asyncio
 import logging
 
 from . import _rpc
-from .chain import POLYGON, contract_config, derive_safe_wallet, wallet_config
+from .chain import (
+    NEG_RISK_COLLATERAL_ADAPTER,
+    POLYGON,
+    contract_config,
+    derive_safe_wallet,
+    wallet_config,
+)
 from .errors import EggplantError, InvalidDataError
 from .relayer import RelayerClient
 from .signer import LocalSigner
@@ -27,7 +33,9 @@ _UINT256_MAX = (1 << 256) - 1
 
 async def ensure_approvals(signer: LocalSigner, relayer: RelayerClient, rpc_url: str) -> None:
     """Ensure the signer's Safe wallet exists and holds the approvals negRisk
-    trading needs (pUSD + CTF, for the V2 exchange and the negRisk adapter).
+    trading and position ops need (pUSD + CTF, for the V2 exchange, the legacy
+    negRisk adapter, and the pUSD collateral adapter that convert / merge /
+    redeem now route through).
 
     Idempotent: existing approvals are detected and skipped. A missing Safe
     is deployed through the relayer first.
@@ -49,6 +57,10 @@ async def ensure_approvals(signer: LocalSigner, relayer: RelayerClient, rpc_url:
     targets: list[tuple[str, str]] = [("Neg Risk CTF Exchange V2", exchange_v2)]
     if neg_risk_config.neg_risk_adapter is not None:
         targets.append(("Neg Risk Adapter", neg_risk_config.neg_risk_adapter))
+    # The pUSD collateral adapter is the relayer-allowlisted entry point for
+    # convert / merge / redeem / split since the pUSD migration; it must be a
+    # CTF operator (and pUSD-approved, for split) to pull the wallet's tokens.
+    targets.append(("Neg Risk Collateral Adapter", NEG_RISK_COLLATERAL_ADAPTER))
 
     try:
         nonce = await _rpc.contract_nonce(rpc_url, safe)

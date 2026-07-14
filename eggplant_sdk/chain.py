@@ -51,8 +51,46 @@ WS_USER_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/user"
 #: Conditional Tokens Framework (ERC-1155 outcome tokens).
 CTF = "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
 
-#: negRisk adapter: convert / merge / redeem / split for negRisk events.
+#: Exchange collateral: pUSD (the token current markets are denominated and
+#: paid out in). Bridged USDC.e (:data:`USDC_E`) is wrapped into it via the
+#: :data:`COLLATERAL_ONRAMP`; it is also the ``collateralToken`` argument the
+#: pUSD collateral adapter's CTF-mirror merge / redeem / split calls take.
+COLLATERAL = "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB"
+
+#: Legacy negRisk adapter (USDC.e-native).
+#:
+#: Still on-chain and still the intermediary the exchange settles negRisk
+#: trades through (so trading approvals target it — see
+#: :attr:`ContractConfig.neg_risk_adapter`), and the pUSD collateral adapter
+#: delegates its convert / merge / redeem to it internally. But since the pUSD
+#: (V2) migration the gasless relayer's target allowlist **no longer permits
+#: direct calls to it** — a relayed convert / merge / redeem here is rejected
+#: with ``call blocked: … are not permitted``. Position operations must go
+#: through :data:`NEG_RISK_COLLATERAL_ADAPTER` instead.
 NEG_RISK_ADAPTER = "0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296"
+
+#: pUSD-native negRisk **collateral adapter** (the "V2" contract) — the
+#: relayer-allowlisted entry point for convert / merge / redeem / split since
+#: the pUSD migration.
+#:
+#: It wraps (delegates to) the legacy :data:`NEG_RISK_ADAPTER` internally and
+#: returns proceeds as pUSD. Verified against a live UI convert (tx
+#: ``0xc5d332ab…``). Entry points differ per op:
+#:
+#: - **convert**: ``convertPositions(bytes32,uint256,uint256)`` — same calldata
+#:   as the legacy adapter.
+#: - **merge**: the CTF-mirror
+#:   ``mergePositions(address,bytes32,bytes32,uint256[],uint256)`` with pUSD
+#:   collateral and the ``[1, 2]`` partition. The legacy-style
+#:   ``mergePositions(bytes32,uint256)`` overload exists in its bytecode but
+#:   REVERTS.
+#: - **redeem**: the CTF-mirror
+#:   ``redeemPositions(address,bytes32,bytes32,uint256[])`` with pUSD and
+#:   per-holding index sets. Legacy-style reverts likewise.
+#:
+#: The wallet must have approved it as a CTF operator (``setApprovalForAll``);
+#: a wallet that has ever converted through the Polymarket UI already is.
+NEG_RISK_COLLATERAL_ADAPTER = "0xadA2005600Dec949baf300f4C6120000bDB6eAab"
 
 #: negRisk CTF Exchange V2 — the EIP-712 verifying contract for negRisk order
 #: signing (domain version "2").
@@ -74,9 +112,6 @@ COLLATERAL_ONRAMP = "0x93070a847efEf7F70739046A929D47a521F5B8ee"
 #: ``DepositWallet`` factory — the ``to`` target for relayer ``WALLET`` batch
 #: submissions (ERC-1271 deposit wallets, signature type ``POLY1271``).
 DEPOSIT_WALLET_FACTORY = "0x00000000000Fb5C9ADea0298D729A0CB3823Cc07"
-
-#: Exchange collateral (pUSD) on both supported chains.
-_COLLATERAL = "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB"
 
 # ---------------------------------------------------------------------------
 # Per-chain configs
@@ -117,28 +152,28 @@ _CONTRACT_CONFIGS: dict[tuple[int, bool], ContractConfig] = {
     (POLYGON, False): ContractConfig(
         exchange="0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E",
         exchange_v2=EXCHANGE_V2,
-        collateral=_COLLATERAL,
+        collateral=COLLATERAL,
         conditional_tokens=CTF,
         neg_risk_adapter=None,
     ),
     (POLYGON, True): ContractConfig(
         exchange="0xC5d563A36AE78145C45a50134d48A1215220f80a",
         exchange_v2=NEG_RISK_EXCHANGE_V2,
-        collateral=_COLLATERAL,
+        collateral=COLLATERAL,
         conditional_tokens=CTF,
         neg_risk_adapter=NEG_RISK_ADAPTER,
     ),
     (AMOY, False): ContractConfig(
         exchange="0xdFE02Eb6733538f8Ea35D585af8DE5958AD99E40",
         exchange_v2=EXCHANGE_V2,
-        collateral=_COLLATERAL,
+        collateral=COLLATERAL,
         conditional_tokens="0x69308FB512518e39F9b16112fA8d994F4e2Bf8bB",
         neg_risk_adapter=None,
     ),
     (AMOY, True): ContractConfig(
         exchange="0xC5d563A36AE78145C45a50134d48A1215220f80a",
         exchange_v2=NEG_RISK_EXCHANGE_V2,
-        collateral=_COLLATERAL,
+        collateral=COLLATERAL,
         conditional_tokens="0x69308FB512518e39F9b16112fA8d994F4e2Bf8bB",
         neg_risk_adapter=NEG_RISK_ADAPTER,
     ),

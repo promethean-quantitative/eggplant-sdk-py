@@ -3,8 +3,10 @@ Rust sibling SDK)."""
 
 from eggplant_sdk.chain import (
     AMOY,
+    COLLATERAL,
     CTF,
     NEG_RISK_ADAPTER,
+    NEG_RISK_COLLATERAL_ADAPTER,
     NEG_RISK_EXCHANGE_V2,
     POLYGON,
     USDC_E,
@@ -24,7 +26,18 @@ def test_polygon_neg_risk_config():
     assert cfg.exchange_v2 == NEG_RISK_EXCHANGE_V2
     assert cfg.neg_risk_adapter == NEG_RISK_ADAPTER
     assert cfg.conditional_tokens == CTF
+    assert cfg.collateral == COLLATERAL
     assert cfg.exchange == "0xC5d563A36AE78145C45a50134d48A1215220f80a"
+
+
+def test_fund_critical_addresses_pinned():
+    # A typo in either of these silently sends convert/merge/redeem/split to
+    # the wrong contract, so pin the literal checksummed values.
+    assert NEG_RISK_COLLATERAL_ADAPTER == "0xadA2005600Dec949baf300f4C6120000bDB6eAab"
+    assert COLLATERAL == "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB"
+    # The collateral adapter is the pUSD-native V2 successor, distinct from the
+    # de-allowlisted legacy adapter.
+    assert NEG_RISK_COLLATERAL_ADAPTER != NEG_RISK_ADAPTER
 
 
 def test_polygon_regular_config():

@@ -32,7 +32,14 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 from . import _rpc
-from .chain import COLLATERAL_ONRAMP, CTF, NEG_RISK_ADAPTER, POLYGON, USDC_E
+from .chain import (
+    COLLATERAL,
+    COLLATERAL_ONRAMP,
+    CTF,
+    NEG_RISK_COLLATERAL_ADAPTER,
+    POLYGON,
+    USDC_E,
+)
 from .errors import EggplantError, InvalidDataError, RelayerQuotaExhaustedError
 from .relayer import DepositWalletCall, RelayerClient
 from .signer import LocalSigner
@@ -215,27 +222,36 @@ def build_convert_calldata(question_ids: list[bytes], amount: int) -> bytes:
 
 
 def build_merge_calldata(condition_id: bytes, amount: int) -> bytes:
-    """Calldata for ``NegRiskAdapter.mergePositions``: burn ``amount``
-    YES+NO on the condition for ``amount`` collateral."""
-    return _rpc.encode_call(
-        "mergePositions(bytes32,uint256)", ["bytes32", "uint256"], [condition_id, amount]
-    )
+    """Calldata to merge ``amount`` YES+NO on ``condition_id`` back into
+    ``amount`` collateral, through the pUSD
+    :data:`~eggplant_sdk.chain.NEG_RISK_COLLATERAL_ADAPTER`.
+
+    The adapter mirrors the CTF ABI, so this is the CTF-mirror
+    ``mergePositions(collateralToken, parentCollectionId, conditionId,
+    partition, amount)`` with pUSD collateral, a zero parent collection, and
+    the binary ``[1, 2]`` partition — verified against a live UI merge (tx
+    ``0xe92073a6…``). The legacy-style ``mergePositions(bytes32,uint256)``
+    overload the old adapter took still exists in this adapter's bytecode but
+    REVERTS.
+    """
+    return build_merge_calldata_ctf(COLLATERAL, condition_id, amount)
 
 
 def build_split_calldata(condition_id: bytes, amount: int) -> bytes:
-    """Calldata for ``NegRiskAdapter.splitPosition(bytes32,uint256)``:
-    merge's inverse — pull ``amount`` collateral, mint ``amount`` YES+NO on
-    the condition.
+    """Calldata to split ``amount`` collateral into ``amount`` YES+NO on
+    ``condition_id`` (merge's inverse), through the pUSD
+    :data:`~eggplant_sdk.chain.NEG_RISK_COLLATERAL_ADAPTER` — the CTF-mirror
+    ``splitPosition(collateralToken, parentCollectionId, conditionId,
+    partition, amount)``.
 
-    ⚠ The least-exercised call in this SDK. The 2-arg *merge* through this
-    identical adapter path is heavily exercised and the adapter documents the
-    symmetric split, but verify against the deployed ABI (or split a dust
-    amount first) before trusting it with size. Splitting requires the
-    adapter to be approved to pull the wallet's collateral.
+    ⚠ The least-exercised call in this SDK, and the only one **not** verified
+    against a live on-chain tx. The heavily exercised merge takes the exact
+    symmetric CTF-mirror form through this same adapter, so this is the
+    consistent shape — but split a dust amount first before trusting it with
+    size. Splitting also requires the adapter to be approved to pull the
+    wallet's pUSD collateral.
     """
-    return _rpc.encode_call(
-        "splitPosition(bytes32,uint256)", ["bytes32", "uint256"], [condition_id, amount]
-    )
+    return build_split_calldata_ctf(COLLATERAL, condition_id, amount)
 
 
 def build_split_calldata_ctf(collateral: str, condition_id: bytes, amount: int) -> bytes:
@@ -259,23 +275,28 @@ def build_merge_calldata_ctf(collateral: str, condition_id: bytes, amount: int) 
 
 
 def build_redeem_calldata(condition_id: bytes, yes_amount: int, no_amount: int) -> bytes:
-    """Calldata for ``NegRiskAdapter.redeemPositions(conditionId, [yes,
-    no])``.
+    """Calldata to redeem a resolved negRisk condition through the pUSD
+    :data:`~eggplant_sdk.chain.NEG_RISK_COLLATERAL_ADAPTER`.
 
-    The adapter's ``_amounts`` is length-2, ``[yesAmount, noAmount]`` (index
-    0 = YES, index 1 = NO — the deployed contract's NatSpec). It pulls
-    *exactly* these amounts from the caller, redeems them through the CTF,
-    and unwraps the resolved payout back to the caller — so pass the
-    wallet's **exact** on-chain balances: an amount above the held balance
-    reverts, one below leaves a remainder unredeemed. Only meaningful once
-    the condition is resolved (an unresolved redeem reverts in the CTF); the
-    caller gates on that.
+    The adapter mirrors the CTF ABI, so this is the CTF-mirror
+    ``redeemPositions(collateralToken, parentCollectionId, conditionId,
+    indexSets)`` with pUSD collateral and a zero parent collection — verified
+    against live on-chain redeems (tx ``0x2252f36d…`` used ``[1, 2]``,
+    ``0x7bb402a9…`` used ``[1]``). Unlike the legacy
+    ``redeemPositions(bytes32,uint256[])`` (which took explicit ``[yes, no]``
+    amounts and REVERTS on this adapter), the CTF-mirror form takes **index
+    sets** and redeems the caller's *full* balance of each: ``yes_amount`` /
+    ``no_amount`` here only decide **which** sides to include (``> 0``), not how
+    much — ``YES = index set 1`` (outcome slot 0), ``NO = index set 2`` (slot
+    1). Only meaningful once the condition is resolved (an unresolved redeem
+    reverts in the CTF); the caller gates on that and filters both-zero legs.
     """
-    return _rpc.encode_call(
-        "redeemPositions(bytes32,uint256[])",
-        ["bytes32", "uint256[]"],
-        [condition_id, [yes_amount, no_amount]],
-    )
+    index_sets = []
+    if yes_amount > 0:
+        index_sets.append(1)
+    if no_amount > 0:
+        index_sets.append(2)
+    return build_redeem_calldata_ctf(COLLATERAL, condition_id, index_sets)
 
 
 def build_redeem_calldata_ctf(collateral: str, condition_id: bytes, index_sets: list[int]) -> bytes:
@@ -300,11 +321,14 @@ def redeem_calls(redeems: list[tuple[bytes, int, int]]) -> list[DepositWalletCal
     condition.
 
     ``redeems`` is ``(condition_id, yes_amount, no_amount)``; every call
-    targets the shared :data:`~eggplant_sdk.chain.NEG_RISK_ADAPTER`. The
+    targets the shared :data:`~eggplant_sdk.chain.NEG_RISK_COLLATERAL_ADAPTER`. The
     caller filters out legs with both amounts zero and gates on resolution.
     """
     return [
-        DepositWalletCall(target=NEG_RISK_ADAPTER, data=build_redeem_calldata(cid, yes, no))
+        DepositWalletCall(
+            target=NEG_RISK_COLLATERAL_ADAPTER,
+            data=build_redeem_calldata(cid, yes, no),
+        )
         for cid, yes, no in redeems
     ]
 
@@ -313,7 +337,10 @@ def merge_calls(merges: list[tuple[bytes, int]]) -> list[DepositWalletCall]:
     """``DepositWallet`` calls to merge YES+NO pairs, one per condition.
     ``merges`` is ``(condition_id, amount)``."""
     return [
-        DepositWalletCall(target=NEG_RISK_ADAPTER, data=build_merge_calldata(cid, amount))
+        DepositWalletCall(
+            target=NEG_RISK_COLLATERAL_ADAPTER,
+            data=build_merge_calldata(cid, amount),
+        )
         for cid, amount in merges
     ]
 
@@ -326,7 +353,10 @@ def split_calls(splits: list[tuple[bytes, int]]) -> list[DepositWalletCall]:
     see :func:`build_split_calldata` for the net-new caveat.
     """
     return [
-        DepositWalletCall(target=NEG_RISK_ADAPTER, data=build_split_calldata(cid, amount))
+        DepositWalletCall(
+            target=NEG_RISK_COLLATERAL_ADAPTER,
+            data=build_split_calldata(cid, amount),
+        )
         for cid, amount in splits
     ]
 
@@ -560,7 +590,7 @@ def plan_calls(plans: list[EventPlan]) -> list[PlannedCall]:
             calls.append(
                 PlannedCall(
                     call=DepositWalletCall(
-                        target=NEG_RISK_ADAPTER,
+                        target=NEG_RISK_COLLATERAL_ADAPTER,
                         data=build_convert_calldata(tier.question_ids, tier.amount),
                     ),
                     gas=convert_gas(plan.n_legs),
@@ -1042,7 +1072,7 @@ async def process_convert(
         signer,
         relayer,
         wallet,
-        [DepositWalletCall(target=NEG_RISK_ADAPTER, data=convert_data)],
+        [DepositWalletCall(target=NEG_RISK_COLLATERAL_ADAPTER, data=convert_data)],
         "convert",
         settle,
     )
