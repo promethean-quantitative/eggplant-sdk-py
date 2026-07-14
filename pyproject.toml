@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "eggplant-sdk"
-version = "0.2.0"
+version = "0.3.1"
 description = "A Python SDK for Polymarket: CLOB trading with all signature types, relayer operations (merge/split/convert/redeem), order-book streams, Gamma and Data APIs"
 readme = "README.md"
 license = { file = "LICENSE" }
